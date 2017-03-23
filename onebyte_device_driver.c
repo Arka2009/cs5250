@@ -18,10 +18,10 @@ ssize_t onebyte_write(struct file* filep, const char* buf, size_t count, loff_t*
 
 /* definition of file operation structure */
 struct file_operations onebyte_fops = {
-	read: onebyte_read,
-	write: onebyte_write;
-	open: onebyte_open;
-	release: onebyte_release
+	.read = onebyte_read,
+	.write = onebyte_write,
+	.open = onebyte_open,
+	.release = onebyte_release,
 };
 
 char* onebyte_data = NULL;
@@ -51,13 +51,13 @@ ssize_t onebyte_read(struct file* filep, char* buf, size_t count, loff_t* f_pos)
 }
 
 ssize_t onebyte_write(struct file* filep, const char* buf, size_t count, loff_t* f_pos) {
-	if(len > 1) {
+	if(count > 1) {
 		printk(KERN_INFO "onebyte_device: Failed to write device, accepts a single byte only\n");
 		return -EFAULT;
 	}
 	sprintf(onebyte_data,buf);
 	printk(KERN_INFO "onebyte_device: Write Successful\n");
-	return len;
+	return count;
 }
 
 /* LKM init modules */
@@ -78,9 +78,10 @@ static int __init onebyte_device_init(void) {
 	}
 	*onebyte_data = "X";
 	printk(KERN_INFO "onebyte_device: Successfully initialized one byte device\n");
+	return 0;
 }
 
-static init --exit onebyte_device_exit(void) {
+static int __exit onebyte_device_exit(void) {
 	printk(KERN_INFO "onebyte_device: Unloading one byte device\n");
 	if(onebyte_data) {
 		kfree(onebyte_data);
@@ -88,6 +89,7 @@ static init --exit onebyte_device_exit(void) {
 	}
 	unregister_chrdev(MAJOR_NUMBER,"onebyte_device");
 	printk(KERN_INFO "onebyte_device: Successfuly unloaded\n");
+	return 0;
 }
 
 MODULE_LICENSE("GPL");

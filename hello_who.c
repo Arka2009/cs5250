@@ -12,14 +12,13 @@ MODULE_PARM_DESC(who,"Who Am I ?");
 
 static int __init hello_init(void)
 {
-	printk(KERN_INFO "Hello, World.\n");
-	printk(KERN_INFO "%s\n",who);
+	printk(KERN_INFO "Hello, World greetings from %s\n",who);
 	return 0;
 }
 
 static void __exit hello_exit(void)
 {
-	printk(KERN_INFO "Goodbye, world\n");
+	printk(KERN_INFO "Goodbye, world, regards %s\n",who);
 }
 
 module_init(hello_init);

@@ -8,7 +8,7 @@
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 
-#define MAJOR_NUMBER 61
+#define MAJOR_NUMBER 61 	// You can also try to get the device number automatically
 
 /* forward declaration */
 int onebyte_open(struct inode* inode, struct file* filep);
@@ -24,12 +24,16 @@ struct file_operations onebyte_fops = {
 	.release = onebyte_release,
 };
 
-char* onebyte_data = NULL;
+static char* onebyte_data = NULL;		// Stores the Character
+static int   onebyte_numbOpens = 0;		// Number of Opens
 
 int onebyte_open(struct inode* inode, struct file* filep) {
-	printk(KERN_INFO "onebyte_device: Device Successfully Opened\n");
+	onebyte_numbOpens++;
+	printk(KERN_INFO "onebyte_device: Device Successfully Opened, \
+	%d time(s)\n",onebyte_numbOpens);
 	return 0;
 }
+
 int onebyte_release(struct inode* inode, struct file* filep) { 
 	printk(KERN_INFO "onebyte_device: Device Successfully Closed\n");
 	return 0;
@@ -55,7 +59,8 @@ ssize_t onebyte_write(struct file* filep, const char* buf, size_t count, loff_t*
 		printk(KERN_INFO "onebyte_device: Failed to write device, accepts a single byte only\n");
 		return -EFAULT;
 	}
-	sprintf(onebyte_data,buf);
+	//sprintf(onebyte_data,buf);
+	*onebyte_data = buf[0];
 	printk(KERN_INFO "onebyte_device: Write Successful\n");
 	return count;
 }
@@ -76,7 +81,8 @@ static int __init onebyte_device_init(void) {
 		printk(KERN_ALERT "onebyte_device: Memory allocation failed during initialization\n");
 		return -ENOMEM;
 	}
-	*onebyte_data = "X";
+	//sprintf(onebyte_data,"X");
+	*onebyte_data = 'X';
 	printk(KERN_INFO "onebyte_device: Successfully initialized one byte device\n");
 	return 0;
 }

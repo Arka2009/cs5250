@@ -21,6 +21,14 @@
 #define FOURMB_DEBUG2
 #endif /* !FOURMB_DEBUG1 */
 
+/* for ioctl test */
+#define FOURMB_IOC_MAGIC	'k'
+#define FOURMB_IOC_HELLO 	_IO(FOURMB_IOC_MAGIC,1)
+#define FOURMB_IOC_STM		_IOW(FOURMB_IOC_MAGIC,2,unsigned long) /* write a message */
+#define FOURMB_IOC_LDM		_IOR(FOURMB_IOC_MAGIC,3,unsigned long) /* read a message*/
+#define FOURMB_IOC_LDSTM	_IORW(FOURMB_IOC_MAGIC,4,unsigned long) /* Do both */
+#define FOURMB_IOC_MAXNR	14
+
 int fourmb_major = MAJOR_NUMBER;
 int fourmb_minor = 0;
 
@@ -51,6 +59,7 @@ struct fourmb_dev {
 	 */
 	unsigned long size;
 	struct cdev cdev;
+	char* dev_message;	// used in ioctl method.
 };
 
 struct fourmb_dev* fourmb_device; /* Device Instance */
@@ -61,6 +70,7 @@ int fourmb_release(struct inode* inode, struct file* filep);
 ssize_t fourmb_read(struct file* filep, char* buf, size_t count, loff_t* f_pos);
 ssize_t fourmb_write(struct file* filep, const char* buf, size_t count, loff_t* f_pos);
 loff_t fourmb_lseek(struct file* filep, loff_t, int whence);
+long fourmb_ioctl(struct file* filep, unsigned int, unsigned long);
 int fourmb_device_clean(struct fourmb_dev*);
 
 /* definition of file operation structure */
@@ -70,7 +80,7 @@ struct file_operations fourmb_fops = {
 	.open 			= fourmb_open,
 	.release 		= fourmb_release,
 	.llseek			= fourmb_lseek,
-	//.unlocked_ioctl	= fourmb_ioctl,
+	.unlocked_ioctl	= fourmb_ioctl,
 };
 
 int fourmb_open(struct inode* inode, struct file* filep) {
@@ -267,6 +277,49 @@ loff_t fourmb_lseek(struct file* filep, loff_t off, int whence) {
 	return newpos;
 }
 
+long fourmb_ioctl(struct file *filep, unsigned int cmd, unsigned long arg) {
+	struct fourmb_device* dev;
+	int retval, err;
+	char* dev_message;
+
+	/* check for appropriate commands */
+	if (_IOC_TYPE(cmd) != FOURMB_IOC_MAGIC) return -ENOTTY;
+	if (_IOC_NR(cmd) > FOURMB_IOC_MAXNR) return -ENOTTY;
+
+	/* check for appropriate direction */
+    if (_IOC_DIR(cmd) & _IOC_READ)
+        err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
+    else if (_IOC_DIR(cmd) & _IOC_WRITE)
+        err =  !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
+    if (err) return -EFAULT;
+
+	switch(cmd) {
+		case FOURMB_IOC_HELLO:
+			printk(KERN_INFO "fourmb_device: hello ioctl usage \n");
+			break;
+
+		case FOURMB_IOC_STM:
+			retval = __get_user(dev_message, (char __user **)arg); // is this correct
+			if(retval) {
+				printk(KERN_INFO "fourmb_device: ioctl device naming failed\n");
+				return retval;
+			}
+			printk(KERN_INFO "fourmb_device: ioctl naming the device as %s\n",dev_message);
+			dev->dev_message = dev_message;
+			break;
+
+		//case FOURMB_IOC_LDM:
+		//	retval = __put_user(dev_message,(char __user *)arg);
+		//	if(retval) {
+		//		printk(KERN_INFO "fourmb_device: ioctl device name retrieval failed\n");
+		//		return retval;
+		//	}
+		//	break;
+		default:
+			return -ENOTTY;
+	}
+}
+
 static int __exit fourmb_device_exit(void) {
 	dev_t dev_num = MKDEV(fourmb_major,fourmb_minor);
 
@@ -311,6 +364,7 @@ static int __init fourmb_device_init(void) {
 	memset(fourmb_device,0,sizeof(struct fourmb_dev));
 
 	/* Device Initialization */
+	fourmb_device->dev_message = "anonymous";
 	cdev_init(&(fourmb_device->cdev),&fourmb_fops);
 	fourmb_device->cdev.owner = THIS_MODULE;
 	fourmb_device->cdev.ops	  = &fourmb_fops;

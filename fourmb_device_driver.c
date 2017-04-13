@@ -13,6 +13,7 @@
 #define DEV_SIZE	 4194304	/* aka 4MB */
 #define SET_SIZE	 512
 #define NUM_SETS	 DEV_SIZE/SET_SIZE
+#define DEBUG
 
 #define FOURMB_DEBUG1
 
@@ -108,7 +109,7 @@ struct fourmb_ll *compute_dev_idx_ptr(struct fourmb_dev *dev, int idx) {
 	while(idx--) {
 		if(!ll->next) {
 			ll->next = kmalloc(sizeof(struct fourmb_ll), GFP_KERNEL);
-			if (ll->next = NULL) {
+			if (ll->next == NULL) {
 				printk(KERN_ERR "fourmb_device: kmalloc failed to allocate a set 2\n");
 				return NULL;
 			}
@@ -129,7 +130,7 @@ ssize_t fourmb_read(struct file* filep, char* buf, size_t count, loff_t* f_pos) 
 	upper_bound = (unsigned long)(*f_pos) + count - 1;
 
 	if(file_pos > dev->size) {
-		printk(KERN_INFO "fourmb_device: Nothing written in the offser\n");
+		printk(KERN_INFO "fourmb_device: Offset out of bound\n");
 		goto out;
 	}
 
@@ -144,7 +145,7 @@ ssize_t fourmb_read(struct file* filep, char* buf, size_t count, loff_t* f_pos) 
 		set_off  = file_pos % SET_SIZE;
 		list_idx_ptr = compute_dev_idx_ptr(dev,list_idx);
 	
-		if(list_idx_ptr || !list_idx_ptr->data) {
+		if(!list_idx_ptr || !list_idx_ptr->data) {
 			printk(KERN_ERR "fourmb_device: Holes encountered while read, How ??\n");
 			retval = count;
 			goto out;
@@ -165,61 +166,74 @@ ssize_t fourmb_read(struct file* filep, char* buf, size_t count, loff_t* f_pos) 
 }
 
 ssize_t fourmb_write(struct file* filep, const char* buf, size_t count, loff_t* f_pos) {
+	
 	ssize_t retval = 0;
 	unsigned int list_idx, set_off;
 	struct fourmb_dev* dev = filep->private_data;
-	struct fourmb_ll* list_idx_ptr;	
-	unsigned long file_pos = (unsigned long)(*f_pos);
-	unsigned long upper_bound = (unsigned long)(*f_pos) + count - 1;
+	struct fourmb_ll* list_idx_ptr;
+	
+	/* file offset bounds */
+	unsigned long file_pos 	  = (unsigned long)(*f_pos);
 
 	/* Do a bounds checking */
-	if(upper_bound > DEV_SIZE) {
-		printk(KERN_INFO "fourmb_device: Write limit to device exceeded\n");
-		upper_bound = DEV_SIZE;
+	if(file_pos > DEV_SIZE) {
+		printk(KERN_ERR "fourmb_device: Write limit to device exceeded\n");
+		goto out;
 	}
 
-	/* reset the count value */
-	count = 0;
-	while(file_pos <= upper_bound) {
-		/* resolve the indices */
-		list_idx = file_pos / SET_SIZE;
-		set_off  = file_pos % SET_SIZE;
-		list_idx_ptr = compute_dev_idx_ptr(dev,list_idx);
-		
-		if(list_idx_ptr == NULL) {
-			printk(KERN_INFO "fourmb_device: Unable to create sets while writing\n");
-			retval = count;
-			goto out;
-		}
+	#ifdef DEBUG
+	char written;
+	printk(KERN_DEBUG "fourmb_device: file_pos = %d, count = %d\n",file_pos,count);
+	#endif
 
+	/* resolve the indices */
+	list_idx 	 = file_pos / SET_SIZE;
+	set_off  	 = file_pos % SET_SIZE;
+	list_idx_ptr = compute_dev_idx_ptr(dev,list_idx);
+	
+	if(list_idx_ptr == NULL) {
+		printk(KERN_ERR "fourmb_device: Unable to create sets while writing\n");
+		goto out;
+	}
+
+	if(!list_idx_ptr->data) {
+		list_idx_ptr->data = kmalloc(SET_SIZE,GFP_KERNEL);
 		if(!list_idx_ptr->data) {
-			list_idx_ptr->data = kmalloc(SET_SIZE,GFP_KERNEL);
-			if(!list_idx_ptr->data) {
-				printk(KERN_INFO "fourmb_device: Unable to create set offsets while writing\n");
-				retval = count;
-				goto out;
-			}
-			memset(list_idx_ptr->data,0,SET_SIZE);
-		}
-
-		/* 
-		 * Does it make sense to copy character one by one
-		 * You might get unexpected results.
-		 */
-		if(copy_from_user(list_idx_ptr->data + set_off,buf,1)) {
-			printk(KERN_ERR "fourmb_device: Unable to create copy from user while writing\n");
-			retval = -EFAULT;
+			printk(KERN_ERR "fourmb_device: Unable to create set offsets while writing\n");
 			goto out;
 		}
-		file_pos++;
-		count++;
+		memset(list_idx_ptr->data,0,SET_SIZE);
 	}
 
-	*f_pos = file_pos;
-	retval = count;
-	if(upper_bound > dev->size)
-		dev->size = upper_bound;
+	/* Re-evaluate count, (you cannot write to more than one set) */
+	if ((set_off + count) > SET_SIZE) {
+		count = SET_SIZE - set_off;
+	}
+	
+	if(copy_from_user(list_idx_ptr->data + set_off,buf,count)) {
+		printk(KERN_ERR "fourmb_device: Unable to create copy from user while writing\n");
+		retval = -EFAULT;
+		goto out;
+	}
+	#ifdef DEBUG
+	int j;
+	for(j = 0; j < count; j++) {
+		written = *(char *)(list_idx_ptr->data + j);
+		printk(KERN_DEBUG "fourmb_device: character written  to the device = %c\n",written);
+	}
+	#endif
 
+	*f_pos += count;
+	retval = count;
+	if ((file_pos + count - 1) > dev->size)
+		dev->size = file_pos + count;
+	
+	#ifdef DEBUG
+	printk(KERN_DEBUG "fourmb_device: Resultant file offset %d\n",*f_pos);
+	printk(KERN_DEBUG "fourmb_device: Bytes stored in the device %d\n",dev->size);
+	printk(KERN_DEBUG "fourmb_device: Bytes written %d\n",count);
+	#endif
+	
 	out:
 		return retval;
 }
@@ -233,6 +247,7 @@ static int __exit fourmb_device_exit(void) {
 		kfree(fourmb_device);
 	}
 	unregister_chrdev_region(dev_num,1);
+	printk(KERN_INFO "fourmb_device: Device removed successfully\n");
 	return 0;	
 }
 
@@ -275,6 +290,8 @@ static int __init fourmb_device_init(void) {
 		printk(KERN_ERR "fourmb_device: Registration failed\n");
 	}
 
+	printk(KERN_INFO "fourmb_device: Device initialized and registered successfully\n");
+	return 0;
 	fail:
 		fourmb_device_exit();
 		return retval;

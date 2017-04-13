@@ -4,10 +4,8 @@ device="fourmb_device_driver"
 mode="664"
 major=61
 
-make clean
+# Compile and load the device
 make
-insmod ./$module.ko
-rm -rf /dev/${device} #remove stale nodes
+rm -rf /dev/${device}	# remove stale devices
 mknod /dev/${device} c $major 0
-ln -sf ${device} /dev/${device}
-chmod $mode /dev/${device}
+insmod ./$module.ko

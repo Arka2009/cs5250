@@ -7,6 +7,8 @@
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/cdev.h>
+#include <linux/ioctl.h>
+#include <linux/string.h>
 #include <asm/uaccess.h>
 
 #define MAJOR_NUMBER 61 	// You can also try to get the device number automatically
@@ -59,7 +61,7 @@ struct fourmb_dev {
 	 */
 	unsigned long size;
 	struct cdev cdev;
-	char* dev_message;	// used in ioctl method.
+	char* dev_msg;	// used in ioctl method.
 };
 
 struct fourmb_dev* fourmb_device; /* Device Instance */
@@ -91,6 +93,9 @@ int fourmb_open(struct inode* inode, struct file* filep) {
 	if((filep->f_flags & O_ACCMODE) == O_WRONLY) {
 		fourmb_device_clean(dev);
 	}
+	#ifdef DEBUG
+	printk(KERN_INFO "fourmb_device: Device Successfully opened");
+	#endif
 	return 0;
 }
 
@@ -278,9 +283,9 @@ loff_t fourmb_lseek(struct file* filep, loff_t off, int whence) {
 }
 
 long fourmb_ioctl(struct file *filep, unsigned int cmd, unsigned long arg) {
-	struct fourmb_device* dev;
-	int retval, err;
-	char* dev_message;
+	struct fourmb_dev *dev = filep->private_data;
+	int retval, err = 0;
+	//char* dev_msg;
 
 	/* check for appropriate commands */
 	if (_IOC_TYPE(cmd) != FOURMB_IOC_MAGIC) return -ENOTTY;
@@ -298,18 +303,29 @@ long fourmb_ioctl(struct file *filep, unsigned int cmd, unsigned long arg) {
 			printk(KERN_INFO "fourmb_device: hello ioctl usage \n");
 			break;
 
-		case FOURMB_IOC_STM:
-			retval = __get_user(dev_message, (char __user **)arg); // is this correct
-			if(retval) {
-				printk(KERN_INFO "fourmb_device: ioctl device naming failed\n");
-				return retval;
-			}
-			printk(KERN_INFO "fourmb_device: ioctl naming the device as %s\n",dev_message);
-			dev->dev_message = dev_message;
+		case FOURMB_IOC_STM: /* write the device string */
+			//retval = __get_user(dev_msg, (void __user *)arg); // is this correct
+			//if(retval) {
+			//	printk(KERN_INFO "fourmb_device: ioctl device naming failed\n");
+			//	return retval;
+			//}
+
+			/* 
+			 * I seriously dont know why it works vis-a-vis the commented
+			 * code above and below, but never mind
+			 */
+			dev->dev_msg	= (char *)arg;
+
+			//if(copy_from_user(dev->dev_msg,(char *)arg,MESSAGE_LEN)) {
+			//	printk(KERN_ERR "fourmb_device: ioctl failed to name the device");
+			//	return -ENOTTY;
+			//}
+			printk(KERN_INFO "fourmb_device: ioctl naming the device as %s\n",dev->dev_msg);
+			//strcpy(dev->dev_msg,dev_msg);
 			break;
 
-		//case FOURMB_IOC_LDM:
-		//	retval = __put_user(dev_message,(char __user *)arg);
+		case FOURMB_IOC_LDM: /* read the device string */	
+		//	retval = __put_user(dev_msg,(char __user *)arg);
 		//	if(retval) {
 		//		printk(KERN_INFO "fourmb_device: ioctl device name retrieval failed\n");
 		//		return retval;
@@ -364,7 +380,7 @@ static int __init fourmb_device_init(void) {
 	memset(fourmb_device,0,sizeof(struct fourmb_dev));
 
 	/* Device Initialization */
-	fourmb_device->dev_message = "anonymous";
+	fourmb_device->dev_msg = "anonymous";
 	cdev_init(&(fourmb_device->cdev),&fourmb_fops);
 	fourmb_device->cdev.owner = THIS_MODULE;
 	fourmb_device->cdev.ops	  = &fourmb_fops;

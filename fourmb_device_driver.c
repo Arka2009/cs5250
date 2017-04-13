@@ -46,7 +46,7 @@ struct fourmb_dev {
 	 * 
 	 * 1. reads do not modify
 	 * 2. writes increase it
-	 * 3. lseek doesn't modify it
+	 * 3. lseek increases it
 	 * 4. How do we clear this then ? 
 	 */
 	unsigned long size;
@@ -60,6 +60,7 @@ int fourmb_open(struct inode* inode, struct file* filep);
 int fourmb_release(struct inode* inode, struct file* filep);
 ssize_t fourmb_read(struct file* filep, char* buf, size_t count, loff_t* f_pos);
 ssize_t fourmb_write(struct file* filep, const char* buf, size_t count, loff_t* f_pos);
+loff_t fourmb_lseek(struct file* filep, loff_t, int whence);
 int fourmb_device_clean(struct fourmb_dev*);
 
 /* definition of file operation structure */
@@ -68,7 +69,7 @@ struct file_operations fourmb_fops = {
 	.write 			= fourmb_write,
 	.open 			= fourmb_open,
 	.release 		= fourmb_release,
-	//.llseek			= fourmb_lseek,
+	.llseek			= fourmb_lseek,
 	//.unlocked_ioctl	= fourmb_ioctl,
 };
 
@@ -122,44 +123,49 @@ struct fourmb_ll *compute_dev_idx_ptr(struct fourmb_dev *dev, int idx) {
 
 ssize_t fourmb_read(struct file* filep, char* buf, size_t count, loff_t* f_pos) {
 	ssize_t retval = 0;
-	unsigned int list_idx, set_off, file_pos, upper_bound;
+	unsigned int list_idx, set_off, file_pos;
 	struct fourmb_ll* list_idx_ptr;
 	struct fourmb_dev *dev = filep->private_data;
 
-	file_pos = (unsigned long)(*f_pos);
-	upper_bound = (unsigned long)(*f_pos) + count - 1;
+	file_pos 	= (unsigned long)(*f_pos);
 
+	#ifdef DEBUG
+	char written;
+	printk(KERN_DEBUG "fourmb_device: file_pos = %d, count = %d for reads\n",file_pos,count);
+	#endif
+	
 	if(file_pos > dev->size) {
-		printk(KERN_INFO "fourmb_device: Offset out of bound\n");
+		printk(KERN_ERR "fourmb_device: Offset out of bound\n");
 		goto out;
 	}
 
-	if(upper_bound > dev->size)
-		upper_bound = dev->size;
-	
-	/* reset the count value */
-	count = 0;	
-	while(file_pos <= upper_bound) {
-		/* resolve the indices */
-		list_idx = file_pos / SET_SIZE;
-		set_off  = file_pos % SET_SIZE;
-		list_idx_ptr = compute_dev_idx_ptr(dev,list_idx);
-	
-		if(!list_idx_ptr || !list_idx_ptr->data) {
-			printk(KERN_ERR "fourmb_device: Holes encountered while read, How ??\n");
-			retval = count;
-			goto out;
-		}
-		
-		if (copy_to_user(buf, list_idx_ptr->data + set_off, 1)) {
-			printk(KERN_ERR "fourmb_device: Copy to user failure\n");
-			retval = count;
-			goto out;
-		}
-		file_pos++;
-		count++;
+	/* trim the count value */
+	if(file_pos + count > dev->size) {
+		count = dev->size - file_pos;
 	}
-	*f_pos = file_pos;
+	
+	/* resolve the indices */
+	list_idx = file_pos / SET_SIZE;
+	set_off  = file_pos % SET_SIZE;
+	list_idx_ptr = compute_dev_idx_ptr(dev,list_idx);
+	
+	if(!list_idx_ptr || !list_idx_ptr->data) {
+		printk(KERN_ERR "fourmb_device: Holes encountered while read, How ??\n");
+		goto out;
+	}
+
+	/* re-evaluate the count value */
+	if(set_off + count > SET_SIZE) {
+		count = SET_SIZE - set_off;
+	}
+		
+	if (copy_to_user(buf, list_idx_ptr->data + set_off, count)) {
+		printk(KERN_ERR "fourmb_device: Copy to user failure\n");
+		retval = count;
+		goto out;
+	}
+
+	*f_pos += count;
 	retval = count;
 	out:
 		return retval;
@@ -238,6 +244,29 @@ ssize_t fourmb_write(struct file* filep, const char* buf, size_t count, loff_t* 
 		return retval;
 }
 
+loff_t fourmb_lseek(struct file* filep, loff_t off, int whence) {
+	struct fourmb_dev *dev = filep->private_data;
+	loff_t newpos;
+
+	switch(whence) {
+		case SEEK_SET :
+			newpos = off;
+			break;
+
+		case SEEK_CUR :
+			newpos = filep->f_pos + off;
+			break;
+
+		case SEEK_END :
+			newpos = dev->size + off;
+			break;
+	}
+
+	if(newpos < 0) return -EINVAL;
+	filep->f_pos = newpos;
+	return newpos;
+}
+
 static int __exit fourmb_device_exit(void) {
 	dev_t dev_num = MKDEV(fourmb_major,fourmb_minor);
 
@@ -248,7 +277,7 @@ static int __exit fourmb_device_exit(void) {
 	}
 	unregister_chrdev_region(dev_num,1);
 	printk(KERN_INFO "fourmb_device: Device removed successfully\n");
-	return 0;	
+	return 0;
 }
 
 int fourmb_device_clean(struct fourmb_dev* dev) {

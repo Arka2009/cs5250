@@ -15,7 +15,7 @@ int lcd;
 
 void test() {
 	int k, i, sum;
-	char s[3], user_msg[30] = "jkfvfvb";
+	char s[3], user_msg[30] = "jkfvfvb", tmp[30];
 	memset(s,'2',sizeof(s));
 
 	printf("ioctl_test: writing to device\n");
@@ -28,9 +28,9 @@ void test() {
 	k = ioctl(lcd,FOURMB_IOC_STM,"lkncvn");
 	printf("ioctl_test: written = %d\n",k);
 
-	//printf("ioctl_test: retrieving a message from the device\n");
-	//k = ioctl(lcd,FOURMB_IOC_LDM,user_msg);
-	//printf("ioctl_test: read = %s\n",user_msg);
+	printf("ioctl_test: retrieving a message from the device\n");
+	k = ioctl(lcd,FOURMB_IOC_LDM,tmp);
+	printf("ioctl_test: read = %s\n",tmp);
 	
 	printf("ioctl_test: swapping  user_msg %s with dev_msg \n",user_msg);
 	k = ioctl(lcd,FOURMB_IOC_LDSTM,user_msg);

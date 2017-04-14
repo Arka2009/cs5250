@@ -16,7 +16,7 @@
 #define SET_SIZE	 512
 #define NUM_SETS	 DEV_SIZE/SET_SIZE
 #define DEBUG
-
+#define MESSAGE_LEN  20
 #define FOURMB_DEBUG1
 
 #ifdef FOURMB_DEBUG1
@@ -28,7 +28,7 @@
 #define FOURMB_IOC_HELLO 	_IO(FOURMB_IOC_MAGIC,1)
 #define FOURMB_IOC_STM		_IOW(FOURMB_IOC_MAGIC,2,unsigned long) /* write a message */
 #define FOURMB_IOC_LDM		_IOR(FOURMB_IOC_MAGIC,3,unsigned long) /* read a message*/
-#define FOURMB_IOC_LDSTM	_IORW(FOURMB_IOC_MAGIC,4,unsigned long) /* Do both */
+#define FOURMB_IOC_LDSTM	_IOWR(FOURMB_IOC_MAGIC,4,unsigned long) /* Do both */
 #define FOURMB_IOC_MAXNR	14
 
 int fourmb_major = MAJOR_NUMBER;
@@ -61,7 +61,7 @@ struct fourmb_dev {
 	 */
 	unsigned long size;
 	struct cdev cdev;
-	char* dev_msg;	// used in ioctl method.
+	char dev_msg[MESSAGE_LEN];	// used in ioctl method.
 };
 
 struct fourmb_dev* fourmb_device; /* Device Instance */
@@ -285,7 +285,7 @@ loff_t fourmb_lseek(struct file* filep, loff_t off, int whence) {
 long fourmb_ioctl(struct file *filep, unsigned int cmd, unsigned long arg) {
 	struct fourmb_dev *dev = filep->private_data;
 	int retval, err = 0;
-	//char* dev_msg;
+	char tmp_msg[MESSAGE_LEN];
 
 	/* check for appropriate commands */
 	if (_IOC_TYPE(cmd) != FOURMB_IOC_MAGIC) return -ENOTTY;
@@ -314,23 +314,43 @@ long fourmb_ioctl(struct file *filep, unsigned int cmd, unsigned long arg) {
 			 * I seriously dont know why it works vis-a-vis the commented
 			 * code above and below, but never mind
 			 */
-			dev->dev_msg	= (char *)arg;
+			//dev->dev_msg	= (char *)arg;
 
-			//if(copy_from_user(dev->dev_msg,(char *)arg,MESSAGE_LEN)) {
-			//	printk(KERN_ERR "fourmb_device: ioctl failed to name the device");
-			//	return -ENOTTY;
-			//}
+			if(copy_from_user(dev->dev_msg,(char *)arg,MESSAGE_LEN)) {
+				printk(KERN_ERR "fourmb_device: ioctl failed to name the device\n");
+				return -ENOTTY;
+			}
 			printk(KERN_INFO "fourmb_device: ioctl naming the device as %s\n",dev->dev_msg);
 			//strcpy(dev->dev_msg,dev_msg);
 			break;
 
-		case FOURMB_IOC_LDM: /* read the device string */	
+		case FOURMB_IOC_LDM: /* read the device string */
+			if(copy_to_user((char *)arg,dev->dev_msg,MESSAGE_LEN)) {
+				printk(KERN_ERR "fourmb_device: ioctl failed to retrieve the device name\n");
+				return -ENOTTY;	
+			}
+			break;
 		//	retval = __put_user(dev_msg,(char __user *)arg);
 		//	if(retval) {
 		//		printk(KERN_INFO "fourmb_device: ioctl device name retrieval failed\n");
 		//		return retval;
 		//	}
 		//	break;
+		case FOURMB_IOC_LDSTM:
+			if(copy_from_user(tmp_msg,(char *)arg,MESSAGE_LEN)) {
+				printk(KERN_ERR "fourmb_device: ioctl failed to tmp_msg store the name for swap\n");
+				return -ENOTTY;
+			}
+			printk(KERN_INFO "fourmb_device: ioctl temporarily stored the name for swap %s\n",tmp_msg);
+			if(copy_to_user((char *)arg,dev->dev_msg,MESSAGE_LEN)) {
+				printk(KERN_ERR "fourmb_device: ioctl failed to swap the device name\n");
+				return -ENOTTY;
+			}
+			printk(KERN_INFO "fourmb_device: ioctl successfuly swapped the device name\n");
+			strcpy(dev->dev_msg,tmp_msg);
+			printk(KERN_INFO "fourmb_device: ioctl new device name after swap %s\n",dev->dev_msg);
+			break;
+
 		default:
 			return -ENOTTY;
 	}
@@ -380,7 +400,7 @@ static int __init fourmb_device_init(void) {
 	memset(fourmb_device,0,sizeof(struct fourmb_dev));
 
 	/* Device Initialization */
-	fourmb_device->dev_msg = "anonymous";
+	strcpy(fourmb_device->dev_msg,"anonymous");
 	cdev_init(&(fourmb_device->cdev),&fourmb_fops);
 	fourmb_device->cdev.owner = THIS_MODULE;
 	fourmb_device->cdev.ops	  = &fourmb_fops;
